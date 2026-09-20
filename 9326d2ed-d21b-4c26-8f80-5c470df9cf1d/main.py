@@ -32,7 +32,7 @@ NUMBER_OF_HOLDINGS = 12
 # "biweekly"
 # "monthly"
 #
-REBALANCE_FREQUENCY = "monthly"
+REBALANCE_FREQUENCY = "biweekly"
 
 
 # -------------------------------------------------------------
