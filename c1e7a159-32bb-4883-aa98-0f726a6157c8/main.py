@@ -1,4 +1,4 @@
-#Type code here{
+{
   "recommendations": [
     {
       "ticker": "QQQ",
