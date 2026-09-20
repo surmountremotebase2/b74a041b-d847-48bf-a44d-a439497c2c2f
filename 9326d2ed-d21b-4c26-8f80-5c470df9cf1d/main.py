@@ -18,7 +18,7 @@ from math import log as ln, sqrt
 # PORTFOLIO SIZE
 # -------------------------------------------------------------
 
-NUMBER_OF_HOLDINGS = 13
+NUMBER_OF_HOLDINGS = 12
 
 
 # -------------------------------------------------------------
