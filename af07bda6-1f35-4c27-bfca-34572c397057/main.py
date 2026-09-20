@@ -6,12 +6,74 @@ from datetime import datetime
 from math import log as ln, sqrt
 
 
+# =============================================================
+# USER CONFIGURATION
+# =============================================================
+#
+# Change ONLY these three parameters when testing variations.
+#
+# Suggested TREND_SMA values:
+# 100, 125, 150, 175, 200
+#
+# Suggested LEVERAGED_SLEEVE values:
+# 0.10, 0.15, 0.20, 0.25, 0.30
+#
+# Available MOMENTUM_MODE values:
+# "1m+3m"
+# "3m+6m"
+# "3m+6m+12m"
+#
+
+TREND_SMA = 175
+
+LEVERAGED_SLEEVE = 0.25
+
+MOMENTUM_MODE = "3m+6m"
+
+
+# =============================================================
+# MOMENTUM PRESETS
+# =============================================================
+#
+# Approximate trading days:
+# 1 month  = 21
+# 3 months = 63
+# 6 months = 126
+# 12 months = 252
+#
+# Each tuple is:
+#
+# (lookback_days, weight)
+#
+
+MOMENTUM_PRESETS = {
+
+    "1m+3m": [
+        (21, 0.50),
+        (63, 0.50)
+    ],
+
+    "3m+6m": [
+        (63, 0.50),
+        (126, 0.50)
+    ],
+
+    "3m+6m+12m": [
+        (63, 0.40),
+        (126, 0.40),
+        (252, 0.20)
+    ]
+}
+
+
+# =============================================================
+# STRATEGY
+# =============================================================
+
 class TradingStrategy(Strategy):
 
     def __init__(self):
 
-        # SPY is used as a market-regime indicator.
-        # All other tickers can receive allocations.
         self.tickers = [
             "SPY",
             "QQQ",
@@ -39,46 +101,63 @@ class TradingStrategy(Strategy):
         ]
 
         self.momentum_universe = (
-            self.non_leveraged +
-            self.leveraged
+            self.non_leveraged
+            + self.leveraged
         )
 
-        # Used for portfolio drawdown estimation.
+        # Strategy-level drawdown tracking
         self.strategy_nav = 1.0
         self.peak_nav = 1.0
+
         self.last_prices = None
         self.last_target = {}
 
-        # Once a 20% strategy drawdown occurs,
-        # remain defensive until SPY recovers above its 100-day SMA.
         self.emergency_mode = False
+
 
     @property
     def interval(self):
         return "1day"
 
+
     @property
     def assets(self):
         return self.tickers
+
 
     @property
     def data(self):
         return []
 
+
     # =========================================================
     # PRICE HELPERS
     # =========================================================
 
-    def close_price(self, ticker, ohlcv, offset=0):
+    def close_price(
+        self,
+        ticker,
+        ohlcv,
+        offset=0
+    ):
 
         try:
+
             return float(
                 ohlcv[-1 - offset][ticker]["close"]
             )
+
         except:
+
             return None
 
-    def trailing_return(self, ticker, ohlcv, days):
+
+    def trailing_return(
+        self,
+        ticker,
+        ohlcv,
+        days
+    ):
 
         if len(ohlcv) <= days:
             return None
@@ -89,16 +168,19 @@ class TradingStrategy(Strategy):
         )
 
         try:
+
             previous = float(
                 ohlcv[-1 - days][ticker]["close"]
             )
+
         except:
+
             return None
 
         if (
-            current is None or
-            previous is None or
-            previous <= 0
+            current is None
+            or previous is None
+            or previous <= 0
         ):
             return None
 
@@ -106,41 +188,62 @@ class TradingStrategy(Strategy):
             current / previous
         ) - 1.0
 
+
     # =========================================================
-    # MOMENTUM
+    # MOMENTUM ENGINE
     # =========================================================
 
-    def momentum_score(self, ticker, ohlcv):
+    def momentum_score(
+        self,
+        ticker,
+        ohlcv
+    ):
 
-        # Approximate trading-day equivalents.
-        three_month = self.trailing_return(
-            ticker,
-            ohlcv,
-            63
+        configuration = (
+            MOMENTUM_PRESETS.get(
+                MOMENTUM_MODE
+            )
         )
 
-        six_month = self.trailing_return(
-            ticker,
-            ohlcv,
-            126
-        )
+        if configuration is None:
 
-        if (
-            three_month is None or
-            six_month is None
-        ):
+            log(
+                "Invalid MOMENTUM_MODE: "
+                + str(MOMENTUM_MODE)
+            )
+
             return -999.0
 
-        return (
-            0.50 * three_month +
-            0.50 * six_month
-        )
+        score = 0.0
+
+        for lookback, weight in configuration:
+
+            value = self.trailing_return(
+                ticker,
+                ohlcv,
+                lookback
+            )
+
+            if value is None:
+                return -999.0
+
+            score += (
+                value * weight
+            )
+
+        return score
+
 
     # =========================================================
     # REALIZED VOLATILITY
     # =========================================================
 
-    def realized_volatility(self, ticker, ohlcv, days):
+    def realized_volatility(
+        self,
+        ticker,
+        ohlcv,
+        days
+    ):
 
         if len(ohlcv) < days + 1:
             return None
@@ -150,10 +253,13 @@ class TradingStrategy(Strategy):
         for row in ohlcv[-(days + 1):]:
 
             try:
+
                 price = float(
                     row[ticker]["close"]
                 )
+
             except:
+
                 return None
 
             if price <= 0:
@@ -163,39 +269,56 @@ class TradingStrategy(Strategy):
 
         returns = []
 
-        for i in range(1, len(prices)):
+        for i in range(
+            1,
+            len(prices)
+        ):
+
             returns.append(
+
                 ln(
-                    prices[i] /
-                    prices[i - 1]
+                    prices[i]
+                    / prices[i - 1]
                 )
+
             )
 
         if len(returns) < 2:
             return None
 
         average = (
-            sum(returns) /
-            len(returns)
+            sum(returns)
+            / len(returns)
         )
 
-        variance = sum(
-            (r - average) ** 2
-            for r in returns
-        ) / (len(returns) - 1)
+        variance = (
+
+            sum(
+                (r - average) ** 2
+                for r in returns
+            )
+
+            / (len(returns) - 1)
+
+        )
 
         return (
-            sqrt(variance) *
-            sqrt(252)
+            sqrt(variance)
+            * sqrt(252)
         )
 
+
     # =========================================================
-    # REBALANCE SCHEDULE
+    # TWICE-WEEKLY REBALANCE
     # =========================================================
 
-    def is_rebalance_day(self, ohlcv):
+    def is_rebalance_day(
+        self,
+        ohlcv
+    ):
 
         try:
+
             date_string = (
                 ohlcv[-1]["QQQ"]["date"]
             )
@@ -205,23 +328,27 @@ class TradingStrategy(Strategy):
                 "%Y-%m-%d"
             )
 
-            # Monday = 0
-            # Thursday = 3
+            # Monday and Thursday
             return (
                 current_date.weekday()
                 in [0, 3]
             )
 
         except:
-            # If Surmount changes date formatting,
-            # execute rather than fail.
+
+            # Do not prevent the strategy from running
+            # if Surmount's date format differs.
             return True
+
 
     # =========================================================
     # ALLOCATION VALIDATION
     # =========================================================
 
-    def clean_allocation(self, allocation):
+    def clean_allocation(
+        self,
+        allocation
+    ):
 
         cleaned = {}
 
@@ -233,36 +360,47 @@ class TradingStrategy(Strategy):
             )
 
             if weight > 0:
+
                 cleaned[ticker] = weight
 
         total = sum(
             cleaned.values()
         )
 
-        # Surmount requires total <= 1.0.
         if total > 1.0:
 
             cleaned = {
+
                 ticker: weight / total
+
                 for ticker, weight
                 in cleaned.items()
+
             }
 
         return cleaned
 
+
     # =========================================================
-    # APPROXIMATE STRATEGY DRAWDOWN
+    # STRATEGY DRAWDOWN TRACKING
     # =========================================================
 
-    def update_strategy_nav(self, ohlcv):
+    def update_strategy_nav(
+        self,
+        ohlcv
+    ):
 
         current_prices = {}
 
-        for ticker in (
-            self.non_leveraged +
-            self.leveraged +
-            ["GLD", "SGOV"]
-        ):
+        portfolio_assets = (
+
+            self.non_leveraged
+            + self.leveraged
+            + ["GLD", "SGOV"]
+
+        )
+
+        for ticker in portfolio_assets:
 
             price = self.close_price(
                 ticker,
@@ -270,70 +408,95 @@ class TradingStrategy(Strategy):
             )
 
             if price is not None:
+
                 current_prices[ticker] = price
 
+
         if (
-            self.last_prices is not None and
-            len(self.last_target) > 0
+            self.last_prices is not None
+            and len(self.last_target) > 0
         ):
 
             daily_return = 0.0
 
-            for ticker, weight in self.last_target.items():
+            for ticker, weight in (
+                self.last_target.items()
+            ):
 
                 old_price = (
-                    self.last_prices.get(ticker)
+                    self.last_prices.get(
+                        ticker
+                    )
                 )
 
                 new_price = (
-                    current_prices.get(ticker)
+                    current_prices.get(
+                        ticker
+                    )
                 )
 
                 if (
-                    old_price is not None and
-                    new_price is not None and
-                    old_price > 0
+                    old_price is not None
+                    and new_price is not None
+                    and old_price > 0
                 ):
 
                     asset_return = (
-                        new_price /
-                        old_price
+
+                        new_price
+                        / old_price
+
                     ) - 1.0
 
+
                     daily_return += (
-                        weight *
-                        asset_return
+
+                        weight
+                        * asset_return
+
                     )
+
 
             self.strategy_nav *= (
                 1.0 + daily_return
             )
 
+
             if (
-                self.strategy_nav >
-                self.peak_nav
+                self.strategy_nav
+                > self.peak_nav
             ):
+
                 self.peak_nav = (
                     self.strategy_nav
                 )
+
 
         self.last_prices = (
             current_prices
         )
 
+
         if self.peak_nav <= 0:
             return 0.0
 
+
         return (
-            self.strategy_nav /
-            self.peak_nav
+
+            self.strategy_nav
+            / self.peak_nav
+
         ) - 1.0
 
+
     # =========================================================
-    # SAVE + RETURN TARGET
+    # RETURN TARGET
     # =========================================================
 
-    def target(self, allocation):
+    def target(
+        self,
+        allocation
+    ):
 
         allocation = (
             self.clean_allocation(
@@ -354,24 +517,61 @@ class TradingStrategy(Strategy):
             allocation
         )
 
+
     # =========================================================
     # MAIN STRATEGY
     # =========================================================
 
-    def run(self, data):
+    def run(
+        self,
+        data
+    ):
 
-        ohlcv = data.get("ohlcv")
+        ohlcv = data.get(
+            "ohlcv"
+        )
 
         if ohlcv is None:
+
             return TargetAllocation({})
 
-        # Need 150-day SMA plus
-        # 126-day momentum history.
-        if len(ohlcv) < 160:
-            return TargetAllocation({})
 
         # -----------------------------------------------------
-        # CURRENT PRICES
+        # DYNAMIC HISTORY REQUIREMENT
+        # -----------------------------------------------------
+
+        momentum_configuration = (
+            MOMENTUM_PRESETS.get(
+                MOMENTUM_MODE
+            )
+        )
+
+        if momentum_configuration is None:
+
+            return TargetAllocation({})
+
+
+        longest_momentum_period = max(
+            lookback
+            for lookback, weight
+            in momentum_configuration
+        )
+
+
+        required_history = max(
+            TREND_SMA,
+            longest_momentum_period,
+            100
+        ) + 10
+
+
+        if len(ohlcv) < required_history:
+
+            return TargetAllocation({})
+
+
+        # -----------------------------------------------------
+        # PRICES
         # -----------------------------------------------------
 
         spy_price = self.close_price(
@@ -384,32 +584,29 @@ class TradingStrategy(Strategy):
             ohlcv
         )
 
+
         if (
-            spy_price is None or
-            qqq_price is None
+            spy_price is None
+            or qqq_price is None
         ):
+
             return TargetAllocation({})
 
+
         # -----------------------------------------------------
-        # TREND FILTERS
+        # MOVING AVERAGES
         # -----------------------------------------------------
 
-        spy_sma_150 = SMA(
+        spy_trend_sma = SMA(
             "SPY",
             ohlcv,
-            150
+            TREND_SMA
         )
 
-        spy_sma_100 = SMA(
-            "SPY",
-            ohlcv,
-            100
-        )
-
-        qqq_sma_150 = SMA(
+        qqq_trend_sma = SMA(
             "QQQ",
             ohlcv,
-            150
+            TREND_SMA
         )
 
         qqq_sma_50 = SMA(
@@ -418,42 +615,85 @@ class TradingStrategy(Strategy):
             50
         )
 
+        spy_sma_100 = SMA(
+            "SPY",
+            ohlcv,
+            100
+        )
+
+
         if (
-            spy_sma_150 is None or
-            spy_sma_100 is None or
-            qqq_sma_150 is None or
-            qqq_sma_50 is None
+            spy_trend_sma is None
+            or qqq_trend_sma is None
+            or qqq_sma_50 is None
+            or spy_sma_100 is None
         ):
+
             return TargetAllocation({})
 
-        spy_above_150 = (
-            spy_price >
-            spy_sma_150[-1]
+
+        spy_above_trend = (
+
+            spy_price
+            > spy_trend_sma[-1]
+
         )
+
+
+        qqq_above_trend = (
+
+            qqq_price
+            > qqq_trend_sma[-1]
+
+        )
+
+
+        qqq_trend_confirmation = (
+
+            qqq_sma_50[-1]
+            > qqq_trend_sma[-1]
+
+        )
+
 
         spy_above_100 = (
-            spy_price >
-            spy_sma_100[-1]
+
+            spy_price
+            > spy_sma_100[-1]
+
         )
 
-        qqq_above_150 = (
-            qqq_price >
-            qqq_sma_150[-1]
-        )
-
-        qqq_50_above_150 = (
-            qqq_sma_50[-1] >
-            qqq_sma_150[-1]
-        )
 
         # -----------------------------------------------------
-        # PORTFOLIO DRAWDOWN
+        # STRATEGY DRAWDOWN
         # -----------------------------------------------------
 
         drawdown = (
             self.update_strategy_nav(
                 ohlcv
             )
+        )
+
+
+        log(
+            "Trend SMA: "
+            + str(TREND_SMA)
+        )
+
+        log(
+            "Leverage sleeve: "
+            + str(
+                round(
+                    LEVERAGED_SLEEVE * 100,
+                    1
+                )
+            )
+            + "%"
+        )
+
+        log(
+            "Momentum mode: "
+            + str(MOMENTUM_MODE)
         )
 
         log(
@@ -467,12 +707,15 @@ class TradingStrategy(Strategy):
             + "%"
         )
 
+
         # -----------------------------------------------------
         # 20% EMERGENCY DRAWDOWN
         # -----------------------------------------------------
 
         if drawdown <= -0.20:
+
             self.emergency_mode = True
+
 
         if self.emergency_mode:
 
@@ -482,19 +725,24 @@ class TradingStrategy(Strategy):
 
             else:
 
-                # "Completely to SGOV and GLD"
                 return self.target({
+
                     "SGOV": 0.70,
                     "GLD": 0.30
+
                 })
 
+
         # -----------------------------------------------------
-        # MOMENTUM SCORES
+        # MOMENTUM RANKING
         # -----------------------------------------------------
 
         scores = {}
 
-        for ticker in self.momentum_universe:
+
+        for ticker in (
+            self.momentum_universe
+        ):
 
             scores[ticker] = (
                 self.momentum_score(
@@ -503,17 +751,30 @@ class TradingStrategy(Strategy):
                 )
             )
 
+
         ranked_nonleveraged = sorted(
+
             self.non_leveraged,
-            key=lambda x: scores[x],
+
+            key=lambda ticker:
+                scores[ticker],
+
             reverse=True
+
         )
 
+
         ranked_leveraged = sorted(
+
             self.leveraged,
-            key=lambda x: scores[x],
+
+            key=lambda ticker:
+                scores[ticker],
+
             reverse=True
+
         )
+
 
         best_nonleveraged = (
             ranked_nonleveraged[0]
@@ -527,10 +788,12 @@ class TradingStrategy(Strategy):
             ranked_leveraged[0]
         )
 
+
         log(
             "Momentum scores: "
             + str(scores)
         )
+
 
         # -----------------------------------------------------
         # VOLATILITY FILTER
@@ -544,6 +807,7 @@ class TradingStrategy(Strategy):
             )
         )
 
+
         qqq_vol_100 = (
             self.realized_volatility(
                 "QQQ",
@@ -552,19 +816,24 @@ class TradingStrategy(Strategy):
             )
         )
 
+
         high_volatility = False
 
+
         if (
-            qqq_vol_20 is not None and
-            qqq_vol_100 is not None and
-            qqq_vol_100 > 0
+            qqq_vol_20 is not None
+            and qqq_vol_100 is not None
+            and qqq_vol_100 > 0
         ):
 
             high_volatility = (
-                qqq_vol_20 >
-                1.75 *
-                qqq_vol_100
+
+                qqq_vol_20
+                > 1.75
+                * qqq_vol_100
+
             )
+
 
         # -----------------------------------------------------
         # 15% DRAWDOWN
@@ -572,15 +841,19 @@ class TradingStrategy(Strategy):
 
         if drawdown <= -0.15:
 
-            # Total equity = 25%.
             return self.target({
+
                 best_nonleveraged: 0.25,
+
                 "SGOV": 0.50,
+
                 "GLD": 0.25
+
             })
 
+
         # -----------------------------------------------------
-        # ONLY REBALANCE TWICE PER WEEK
+        # REBALANCE TWICE PER WEEK
         # -----------------------------------------------------
 
         if not self.is_rebalance_day(
@@ -593,20 +866,27 @@ class TradingStrategy(Strategy):
                     self.last_target
                 )
 
+
         # -----------------------------------------------------
         # MARKET REGIMES
         # -----------------------------------------------------
 
         risk_on = (
-            spy_above_150 and
-            qqq_above_150 and
-            qqq_50_above_150
+
+            spy_above_trend
+            and qqq_above_trend
+            and qqq_trend_confirmation
+
         )
 
+
         mixed_regime = (
-            spy_above_150 and
-            not qqq_above_150
+
+            spy_above_trend
+            and not qqq_above_trend
+
         )
+
 
         # -----------------------------------------------------
         # FULL RISK-ON
@@ -614,33 +894,68 @@ class TradingStrategy(Strategy):
 
         if risk_on:
 
-            # Remove leverage when volatility is high
-            # or strategy drawdown reaches 10%.
             leverage_allowed = (
+
                 not high_volatility
                 and drawdown > -0.10
+                and LEVERAGED_SLEEVE > 0
+
             )
+
 
             if leverage_allowed:
 
+                # Keep first non-leveraged ETF at 50%.
+                first_weight = 0.50
+
+                # Leveraged allocation is user-adjustable.
+                leveraged_weight = min(
+                    LEVERAGED_SLEEVE,
+                    0.35
+                )
+
+                # Remaining allocation goes to
+                # second non-leveraged ETF.
+                second_weight = (
+
+                    1.0
+                    - first_weight
+                    - leveraged_weight
+
+                )
+
+
                 allocation = {
-                    best_nonleveraged: 0.50,
-                    second_nonleveraged: 0.25,
-                    best_leveraged: 0.25
+
+                    best_nonleveraged:
+                        first_weight,
+
+                    second_nonleveraged:
+                        second_weight,
+
+                    best_leveraged:
+                        leveraged_weight
+
                 }
+
 
             else:
 
-                # Replace leveraged sleeve with SGOV.
                 allocation = {
-                    best_nonleveraged: 0.50,
-                    second_nonleveraged: 0.25,
-                    "SGOV": 0.25
+
+                    best_nonleveraged:
+                        0.60,
+
+                    second_nonleveraged:
+                        0.40
+
                 }
+
 
             return self.target(
                 allocation
             )
+
 
         # -----------------------------------------------------
         # MIXED REGIME
@@ -649,40 +964,54 @@ class TradingStrategy(Strategy):
         elif mixed_regime:
 
             return self.target({
-                best_nonleveraged: 0.50,
-                "GLD": 0.25,
-                "SGOV": 0.25
+
+                best_nonleveraged:
+                    0.50,
+
+                "GLD":
+                    0.25,
+
+                "SGOV":
+                    0.25
+
             })
 
+
         # -----------------------------------------------------
-        # BOTH BELOW 150-DAY SMA
+        # FULL RISK-OFF
         # -----------------------------------------------------
 
         elif (
-            not spy_above_150 and
-            not qqq_above_150
+            not spy_above_trend
+            and not qqq_above_trend
         ):
 
             return self.target({
-                "SGOV": 0.70,
-                "GLD": 0.30
+
+                "SGOV":
+                    0.70,
+
+                "GLD":
+                    0.30
+
             })
 
+
         # -----------------------------------------------------
-        # OTHER / AMBIGUOUS REGIME
-        #
-        # Example:
-        # SPY below 150-day SMA,
-        # QQQ above 150-day SMA.
-        #
-        # The original prompt does not explicitly define this.
-        # Use a conservative mixed allocation.
+        # OTHER MIXED CONDITION
         # -----------------------------------------------------
 
         else:
 
             return self.target({
-                best_nonleveraged: 0.50,
-                "GLD": 0.25,
-                "SGOV": 0.25
+
+                best_nonleveraged:
+                    0.50,
+
+                "GLD":
+                    0.25,
+
+                "SGOV":
+                    0.25
+
             })
