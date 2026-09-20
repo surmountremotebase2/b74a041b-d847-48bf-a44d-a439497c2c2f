@@ -1,10 +1,7 @@
-#TacticalETFRedo
 from surmount.base_class import Strategy, TargetAllocation
 from surmount.technical_indicators import SMA
 from surmount.logging import log
 
-from datetime import datetime
-from math import log as math_log, sqrt
 
 class TradingStrategy(Strategy):
 
@@ -282,6 +279,5 @@ class TradingStrategy(Strategy):
                 }
 
             log("RISK-OFF")
-   
-        
+
             return TargetAllocation(allocation)
