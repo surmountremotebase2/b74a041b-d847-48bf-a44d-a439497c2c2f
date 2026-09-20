@@ -6,6 +6,7 @@ from surmount.logging import log
 class TradingStrategy(Strategy):
 
     def __init__(self):
+
         self.tickers = [
             "SPY",
             "QQQ",
@@ -17,16 +18,6 @@ class TradingStrategy(Strategy):
             "SPXL",
             "GLD",
             "SGOV"
-        ]
-
-        self.risk_assets = [
-            "QQQ",
-            "SOXX",
-            "SMH",
-            "XLI",
-            "QLD",
-            "TQQQ",
-            "SPXL"
         ]
 
         self.non_leveraged = [
@@ -41,6 +32,11 @@ class TradingStrategy(Strategy):
             "TQQQ",
             "SPXL"
         ]
+
+        self.risk_assets = (
+            self.non_leveraged
+            + self.leveraged
+        )
 
     @property
     def interval(self):
@@ -59,6 +55,7 @@ class TradingStrategy(Strategy):
     # ---------------------------------------------------------
 
     def close_price(self, ticker, ohlcv, offset=0):
+
         try:
             return float(
                 ohlcv[-1 - offset][ticker]["close"]
@@ -67,10 +64,14 @@ class TradingStrategy(Strategy):
             return None
 
     def trailing_return(self, ticker, ohlcv, lookback):
+
         if len(ohlcv) <= lookback:
             return None
 
-        current = self.close_price(ticker, ohlcv)
+        current = self.close_price(
+            ticker,
+            ohlcv
+        )
 
         try:
             past = float(
@@ -79,31 +80,61 @@ class TradingStrategy(Strategy):
         except:
             return None
 
-        if current is None or past <= 0:
+        if current is None:
             return None
 
-        return current / past - 1.0
+        if past <= 0:
+            return None
+
+        return (
+            current / past
+        ) - 1.0
 
     def momentum_score(self, ticker, ohlcv):
-        """
-        Momentum score:
-        40% 3-month return
-        40% 6-month return
-        20% 12-month return
-        """
 
-        r3 = self.trailing_return(ticker, ohlcv, 63)
-        r6 = self.trailing_return(ticker, ohlcv, 126)
-        r12 = self.trailing_return(ticker, ohlcv, 252)
+        return_3m = self.trailing_return(
+            ticker,
+            ohlcv,
+            63
+        )
 
-        if r3 is None or r6 is None or r12 is None:
+        return_6m = self.trailing_return(
+            ticker,
+            ohlcv,
+            126
+        )
+
+        if (
+            return_3m is None
+            or return_6m is None
+        ):
             return -999.0
 
         return (
-            0.40 * r3
-            + 0.40 * r6
-            + 0.20 * r12
+            0.50 * return_3m
+            + 0.50 * return_6m
         )
+
+    def normalize(self, allocation):
+
+        clean = {}
+
+        for ticker, weight in allocation.items():
+
+            if weight > 0:
+                clean[ticker] = float(weight)
+
+        total = sum(clean.values())
+
+        if total > 1.0:
+
+            clean = {
+                ticker: weight / total
+                for ticker, weight
+                in clean.items()
+            }
+
+        return clean
 
     # ---------------------------------------------------------
     # MAIN STRATEGY
@@ -113,41 +144,72 @@ class TradingStrategy(Strategy):
 
         ohlcv = data.get("ohlcv")
 
-        if ohlcv is None or len(ohlcv) < 260:
+        # Same warm-up requirement as the version
+        # that successfully generated backtest results.
+        if ohlcv is None:
+            return TargetAllocation({})
+
+        if len(ohlcv) < 160:
             return TargetAllocation({})
 
         # -----------------------------------------------------
-        # MARKET TREND FILTERS
+        # TREND FILTERS
         # -----------------------------------------------------
 
-        spy_sma_200 = SMA("SPY", ohlcv, 200)
-        spy_sma_50 = SMA("SPY", ohlcv, 50)
+        spy_sma_150 = SMA(
+            "SPY",
+            ohlcv,
+            150
+        )
 
-        qqq_sma_200 = SMA("QQQ", ohlcv, 200)
-        qqq_sma_50 = SMA("QQQ", ohlcv, 50)
+        qqq_sma_150 = SMA(
+            "QQQ",
+            ohlcv,
+            150
+        )
+
+        qqq_sma_50 = SMA(
+            "QQQ",
+            ohlcv,
+            50
+        )
 
         if (
-            spy_sma_200 is None
-            or spy_sma_50 is None
-            or qqq_sma_200 is None
+            spy_sma_150 is None
+            or qqq_sma_150 is None
             or qqq_sma_50 is None
         ):
             return TargetAllocation({})
 
-        spy_price = self.close_price("SPY", ohlcv)
-        qqq_price = self.close_price("QQQ", ohlcv)
-
-        if spy_price is None or qqq_price is None:
-            return TargetAllocation({})
-
-        spy_bullish = (
-            spy_price > spy_sma_200[-1]
-            and spy_sma_50[-1] > spy_sma_200[-1]
+        spy_price = self.close_price(
+            "SPY",
+            ohlcv
         )
 
-        qqq_bullish = (
-            qqq_price > qqq_sma_200[-1]
-            and qqq_sma_50[-1] > qqq_sma_200[-1]
+        qqq_price = self.close_price(
+            "QQQ",
+            ohlcv
+        )
+
+        if (
+            spy_price is None
+            or qqq_price is None
+        ):
+            return TargetAllocation({})
+
+        spy_above_150 = (
+            spy_price >
+            spy_sma_150[-1]
+        )
+
+        qqq_above_150 = (
+            qqq_price >
+            qqq_sma_150[-1]
+        )
+
+        qqq_trend_positive = (
+            qqq_sma_50[-1] >
+            qqq_sma_150[-1]
         )
 
         # -----------------------------------------------------
@@ -157,16 +219,13 @@ class TradingStrategy(Strategy):
         scores = {}
 
         for ticker in self.risk_assets:
-            scores[ticker] = self.momentum_score(
-                ticker,
-                ohlcv
-            )
 
-        ranked_all = sorted(
-            self.risk_assets,
-            key=lambda ticker: scores[ticker],
-            reverse=True
-        )
+            scores[ticker] = (
+                self.momentum_score(
+                    ticker,
+                    ohlcv
+                )
+            )
 
         ranked_nonleveraged = sorted(
             self.non_leveraged,
@@ -180,46 +239,59 @@ class TradingStrategy(Strategy):
             reverse=True
         )
 
-        best_nonleveraged = ranked_nonleveraged[0]
-        second_nonleveraged = ranked_nonleveraged[1]
-        best_leveraged = ranked_leveraged[0]
+        best_nonleveraged = (
+            ranked_nonleveraged[0]
+        )
 
-        log("Momentum ranking: " + str(ranked_all))
-        log("Momentum scores: " + str(scores))
+        second_nonleveraged = (
+            ranked_nonleveraged[1]
+        )
+
+        best_leveraged = (
+            ranked_leveraged[0]
+        )
+
+        log(
+            "Momentum scores: "
+            + str(scores)
+        )
 
         # -----------------------------------------------------
         # FULL RISK-ON
         # -----------------------------------------------------
 
-        if spy_bullish and qqq_bullish:
+        risk_on = (
+            spy_above_150
+            and qqq_above_150
+            and qqq_trend_positive
+        )
 
-            # Require positive medium-term momentum
-            best_nonlev_return = self.trailing_return(
-                best_nonleveraged,
-                ohlcv,
-                126
+        if risk_on:
+
+            leveraged_return = (
+                self.trailing_return(
+                    best_leveraged,
+                    ohlcv,
+                    126
+                )
             )
 
-            best_lev_return = self.trailing_return(
-                best_leveraged,
-                ohlcv,
-                126
-            )
-
-            # If the strongest leveraged ETF also has
-            # positive 6-month momentum, use it.
+            # Use leverage only if its own
+            # six-month momentum is positive.
             if (
-                best_lev_return is not None
-                and best_lev_return > 0
+                leveraged_return is not None
+                and leveraged_return > 0
             ):
 
                 allocation = {
-                    best_nonleveraged: 0.45,
-                    second_nonleveraged: 0.30,
+                    best_nonleveraged: 0.50,
+                    second_nonleveraged: 0.25,
                     best_leveraged: 0.25
                 }
 
-                log("FULL RISK-ON WITH LEVERAGE")
+                log(
+                    "FULL RISK-ON"
+                )
 
             else:
 
@@ -228,27 +300,28 @@ class TradingStrategy(Strategy):
                     second_nonleveraged: 0.40
                 }
 
-                log("RISK-ON WITHOUT LEVERAGE")
-
-            return TargetAllocation(allocation)
+                log(
+                    "RISK-ON WITHOUT LEVERAGE"
+                )
 
         # -----------------------------------------------------
-        # PARTIAL RISK-ON
+        # MIXED REGIME
         # -----------------------------------------------------
 
-        elif spy_bullish or qqq_bullish:
-
-            strongest = ranked_nonleveraged[0]
+        elif (
+            spy_above_150
+            or qqq_above_150
+        ):
 
             allocation = {
-                strongest: 0.60,
-                "GLD": 0.20,
-                "SGOV": 0.20
+                best_nonleveraged: 0.50,
+                "GLD": 0.25,
+                "SGOV": 0.25
             }
 
-            log("PARTIAL RISK-ON")
-
-            return TargetAllocation(allocation)
+            log(
+                "MIXED REGIME"
+            )
 
         # -----------------------------------------------------
         # RISK-OFF
@@ -256,10 +329,12 @@ class TradingStrategy(Strategy):
 
         else:
 
-            gld_return = self.trailing_return(
-                "GLD",
-                ohlcv,
-                126
+            gld_return = (
+                self.trailing_return(
+                    "GLD",
+                    ohlcv,
+                    126
+                )
             )
 
             if (
@@ -268,8 +343,8 @@ class TradingStrategy(Strategy):
             ):
 
                 allocation = {
-                    "GLD": 0.40,
-                    "SGOV": 0.60
+                    "SGOV": 0.70,
+                    "GLD": 0.30
                 }
 
             else:
@@ -278,6 +353,23 @@ class TradingStrategy(Strategy):
                     "SGOV": 1.00
                 }
 
-            log("RISK-OFF")
+            log(
+                "RISK-OFF"
+            )
 
-            return TargetAllocation(allocation)
+        # -----------------------------------------------------
+        # FINAL ALLOCATION
+        # -----------------------------------------------------
+
+        allocation = self.normalize(
+            allocation
+        )
+
+        log(
+            "Target allocation: "
+            + str(allocation)
+        )
+
+        return TargetAllocation(
+            allocation
+        )
