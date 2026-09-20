@@ -282,19 +282,6 @@ class TradingStrategy(Strategy):
                 }
 
             log("RISK-OFF")
-   # -----------------------------------------------------
-        # FINAL VALIDATION
-        # -----------------------------------------------------
-
-        allocation = self.normalize(allocation)
-
-        self.current_allocation = allocation
-
-        log(
-            "Target allocation: "
-            + str(allocation)
-        )
-
-        return TargetAllocation(allocation)
+   
         
             return TargetAllocation(allocation)
