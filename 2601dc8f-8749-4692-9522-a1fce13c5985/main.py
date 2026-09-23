@@ -42,7 +42,7 @@ from math import log as ln, sqrt
 # "monthly"
 #
 
-REBALANCE_FREQUENCY = "weekly"
+REBALANCE_FREQUENCY = "biweekly"
 
 
 # -------------------------------------------------------------
