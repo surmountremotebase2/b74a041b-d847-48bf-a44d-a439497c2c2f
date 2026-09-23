@@ -36,7 +36,7 @@ MAX_LEVERAGED_EXPOSURE = 0.25
 
 # Rebalance frequency:
 # "weekly", "biweekly", "monthly"
-REBALANCE_FREQUENCY = "biweekly"
+REBALANCE_FREQUENCY = "monthly"
 
 # Volatility control
 VOL_SHORT = 20
