@@ -125,7 +125,7 @@ ENABLE_LEVERAGE = True
 
 LEVERAGED_TICKER = "QLD"
 
-LEVERAGE_SLEEVE = 0.05
+LEVERAGE_SLEEVE = 0.10
 
 
 # -------------------------------------------------------------
