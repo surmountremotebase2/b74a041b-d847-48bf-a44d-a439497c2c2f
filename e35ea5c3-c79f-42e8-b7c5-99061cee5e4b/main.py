@@ -29,7 +29,7 @@ WEIGHT_RSI = 0.20
 RSI_PERIOD = 14
 
 # Number of risk assets to hold
-MAX_RISK_ASSETS = 3
+MAX_RISK_ASSETS = 4
 
 # Combined maximum allocation to QLD, TQQQ and SPXL
 MAX_LEVERAGED_EXPOSURE = 0.25
